@@ -1,25 +1,25 @@
 package slimeknights.mantle.recipe.helper;
 
-import com.google.gson.JsonObject;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import com.mojang.serialization.MapCodec;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 
-import java.util.function.Function;
+import java.util.function.Supplier;
 
-/** Simple implementation of a recipe serializer with no properties other than recipe ID. */
-public record SimpleRecipeSerializer<T extends Recipe<?>>(Function<ResourceLocation,T> constructor) implements RecipeSerializer<T> {
+/** Simple implementation of a recipe serializer with no properties. */
+public record SimpleRecipeSerializer<T extends Recipe<?>>(Supplier<T> constructor) implements RecipeSerializer<T> {
   @Override
-  public T fromJson(ResourceLocation id, JsonObject pSerializedRecipe) {
-    return constructor.apply(id);
+  public MapCodec<T> codec() {
+    return MapCodec.unit(constructor);
   }
 
   @Override
-  public T fromNetwork(ResourceLocation id, FriendlyByteBuf pBuffer) {
-    return constructor.apply(id);
+  public StreamCodec<RegistryFriendlyByteBuf,T> streamCodec() {
+    // no data to sync; build a fresh instance on decode. Must NOT use StreamCodec.unit(constructor.get()),
+    // as that captures a single instance and asserts identity equality on encode, which fails because the
+    // map codec (MapCodec.unit(constructor)) decodes a distinct instance per datapack load.
+    return StreamCodec.of((buf, value) -> {}, buf -> constructor.get());
   }
-
-  @Override
-  public void toNetwork(FriendlyByteBuf pBuffer, T pRecipe) {}
 }

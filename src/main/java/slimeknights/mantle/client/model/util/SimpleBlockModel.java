@@ -27,13 +27,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.GsonHelper;
 import net.minecraft.world.inventory.InventoryMenu;
-import net.minecraftforge.client.RenderTypeGroup;
-import net.minecraftforge.client.model.IQuadTransformer;
-import net.minecraftforge.client.model.QuadTransformers;
-import net.minecraftforge.client.model.geometry.IGeometryBakingContext;
-import net.minecraftforge.client.model.geometry.IGeometryLoader;
-import net.minecraftforge.client.model.geometry.IUnbakedGeometry;
-import net.minecraftforge.client.model.geometry.UnbakedGeometryHelper;
+import net.neoforged.neoforge.client.RenderTypeGroup;
+import net.neoforged.neoforge.client.model.IQuadTransformer;
+import net.neoforged.neoforge.client.model.QuadTransformers;
+import net.neoforged.neoforge.client.model.geometry.IGeometryBakingContext;
+import net.neoforged.neoforge.client.model.geometry.IGeometryLoader;
+import net.neoforged.neoforge.client.model.geometry.IUnbakedGeometry;
+import net.neoforged.neoforge.client.model.geometry.UnbakedGeometryHelper;
 import slimeknights.mantle.Mantle;
 
 import javax.annotation.Nonnull;
@@ -198,20 +198,20 @@ public class SimpleBlockModel implements IUnbakedGeometry<SimpleBlockModel> {
     for(Direction direction : part.faces.keySet()) {
       BlockElementFace face = part.faces.get(direction);
       // ensure the name is not prefixed (it always is)
-      String texture = face.texture;
+      String texture = face.texture();
       if (texture.charAt(0) == '#') {
         texture = texture.substring(1);
       }
       // bake the face
       TextureAtlasSprite sprite = spriteGetter.apply(owner.getMaterial(texture));
-      BakedQuad bakedQuad = BlockModel.bakeFace(part, face, sprite, direction, transform, location);
+      BakedQuad bakedQuad = BlockModel.bakeFace(part, face, sprite, direction, transform);
       quadTransformer.processInPlace(bakedQuad);
       // apply cull face
       //noinspection ConstantConditions  Its nullable, just annotated wrongly
-      if (face.cullForDirection == null) {
+      if (face.cullForDirection() == null) {
         builder.addUnculledFace(bakedQuad);
       } else {
-        builder.addCulledFace(Direction.rotate(transform.getRotation().getMatrix(), face.cullForDirection), bakedQuad);
+        builder.addCulledFace(Direction.rotate(transform.getRotation().getMatrix(), face.cullForDirection()), bakedQuad);
       }
     }
   }
@@ -255,8 +255,8 @@ public class SimpleBlockModel implements IUnbakedGeometry<SimpleBlockModel> {
   }
 
   @Override
-  public BakedModel bake(IGeometryBakingContext owner, ModelBaker baker, Function<Material,TextureAtlasSprite> spriteGetter, ModelState transform, ItemOverrides overrides, ResourceLocation location) {
-    return bakeModel(owner, this.getElements(), spriteGetter, transform, overrides, location);
+  public BakedModel bake(IGeometryBakingContext owner, ModelBaker baker, Function<Material,TextureAtlasSprite> spriteGetter, ModelState transform, ItemOverrides overrides) {
+    return bakeModel(owner, this.getElements(), spriteGetter, transform, overrides, BAKE_LOCATION);
   }
 
   /**
@@ -291,7 +291,7 @@ public class SimpleBlockModel implements IUnbakedGeometry<SimpleBlockModel> {
   public static SimpleBlockModel deserialize(JsonObject json, JsonDeserializationContext context) {
     // parent, null if missing
     String parentName = GsonHelper.getAsString(json, "parent", "");
-    ResourceLocation parent = parentName.isEmpty() ? null : new ResourceLocation(parentName);
+    ResourceLocation parent = parentName.isEmpty() ? null : ResourceLocation.parse(parentName);
 
     // textures, empty map if missing
     Map<String, Either<Material, String>> textureMap;

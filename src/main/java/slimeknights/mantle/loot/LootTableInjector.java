@@ -7,12 +7,15 @@ import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.GsonHelper;
 import net.minecraft.world.level.storage.loot.LootTable;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.common.crafting.CraftingHelper;
-import net.minecraftforge.common.crafting.conditions.ICondition.IContext;
-import net.minecraftforge.event.AddReloadListenerEvent;
-import net.minecraftforge.event.LootTableLoadEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
+import net.neoforged.neoforge.common.NeoForge;
+import com.google.gson.JsonElement;
+import com.mojang.serialization.JsonOps;
+import net.minecraft.resources.RegistryOps;
+import net.neoforged.neoforge.common.conditions.ICondition;
+import javax.annotation.Nullable;
+import net.neoforged.neoforge.event.AddReloadListenerEvent;
+import net.neoforged.neoforge.event.LootTableLoadEvent;
+import net.neoforged.bus.api.EventPriority;
 import slimeknights.mantle.Mantle;
 import slimeknights.mantle.data.listener.IEarlyReloadListener;
 import slimeknights.mantle.loot.LootTableInjection.LootPoolInjection;
@@ -36,15 +39,16 @@ public enum LootTableInjector implements IEarlyReloadListener {
 
   /** Initializes the loot table injector */
   public static void init() {
-    MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, AddReloadListenerEvent.class, event -> {
+    NeoForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, AddReloadListenerEvent.class, event -> {
       event.addListener(INSTANCE);
-      INSTANCE.context = event.getConditionContext();
+      INSTANCE.conditionOps = RegistryOps.create(JsonOps.INSTANCE, event.getRegistryAccess());
     });
-    MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, LootTableLoadEvent.class, INSTANCE::lootTableLoad);
+    NeoForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, LootTableLoadEvent.class, INSTANCE::lootTableLoad);
   }
 
-  /** Condition context for preventing load */
-  private IContext context = IContext.EMPTY;
+  /** Registry-backed ops for evaluating load conditions */
+  @Nullable
+  private RegistryOps<JsonElement> conditionOps = null;
   /** Map of injections to use on loot table load */
   private Map<ResourceLocation,LootTableInjection> injections = Collections.emptyMap();
 
@@ -57,8 +61,8 @@ public enum LootTableInjector implements IEarlyReloadListener {
       try (Reader reader = entry.getValue().openAsReader()) {
         JsonObject json = GsonHelper.fromJson(JsonHelper.DEFAULT_GSON, reader, JsonObject.class);
         if (json != null) {
-          // skip if empty for easy removals
-          if (!json.keySet().isEmpty() && CraftingHelper.processConditions(json, "conditions", context)) {
+          // skip if empty for easy removals, and honor neoforge load conditions (e.g. mod-loaded gating)
+          if (!json.keySet().isEmpty() && (conditionOps == null || ICondition.conditionsMatched(conditionOps, json))) {
             // the builder allows us to merge from multiple sources, for efficiency
             // ensures a given table name and pool name both show just once
             LootTableInjection injection = LootTableInjection.LOADABLE.deserialize(json);

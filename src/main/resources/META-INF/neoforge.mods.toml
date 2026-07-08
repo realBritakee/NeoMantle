@@ -1,0 +1,28 @@
+modLoader="javafml"
+loaderVersion="${loader_range}"
+issueTrackerURL="https://github.com/vancevoj/Mantle/issues"
+license="MIT"
+
+[[mods]]
+    modId="mantle"
+    version="${version}"
+    displayName="Neo Mantle"
+    authors="Slime Knights, vancevoj"
+    description='''
+Shared code for Slime Knights mods and others. Neo Mantle is vancevoj's NeoForge 1.21.1 port of Slime Knights' Mantle ${mod_version}; it was inspired by their work and nearly all of the design and programming belong to them. Required by Neo Tinkers.
+    '''
+    displayURL="https://github.com/vancevoj/Mantle"
+
+[[dependencies.mantle]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neoforge_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.mantle]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_range}"
+    ordering="NONE"
+    side="BOTH"

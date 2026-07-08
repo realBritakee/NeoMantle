@@ -2,7 +2,7 @@ package slimeknights.mantle.block.entity;
 
 import lombok.Getter;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -16,35 +16,41 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraftforge.common.capabilities.Capability;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.common.util.LazyOptional;
-import net.minecraftforge.items.IItemHandlerModifiable;
-import net.minecraftforge.items.wrapper.InvWrapper;
+import net.neoforged.neoforge.items.IItemHandlerModifiable;
+import net.neoforged.neoforge.items.wrapper.InvWrapper;
 import slimeknights.mantle.util.ItemStackList;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 // Updated version of InventoryLogic in Mantle. Also contains a few bugfixes DOES NOT OVERRIDE createMenu
 public abstract class InventoryBlockEntity extends NameableBlockEntity implements Container, MenuProvider, Nameable {
   private static final String TAG_INVENTORY_SIZE = "InventorySize";
   private static final String TAG_ITEMS = "Items";
   private static final String TAG_SLOT = "Slot";
+  /**
+   * Default stack size limit. Acts as a high ceiling so the real cap is each item's own max stack size
+   * ({@link ItemStack#getMaxStackSize()}), matching the rest of the game. Previously this was a flat 64,
+   * which capped tinker station / workbench slots at 64 even when a mod (e.g. Stack Size Tweaks) raised
+   * item stacks to 256, producing a stack-size mismatch and an item duplication bug. Inventories that
+   * truly need a smaller cap (e.g. the casting table at 1) still pass an explicit limit.
+   */
+  public static final int DEFAULT_STACK_SIZE_LIMIT = 1_000_000_000;
 
   private NonNullList<ItemStack> inventory;
   /** If true, the inventory size is saved to NBT, false means you are responsible for serializing it if it changes */
   private final boolean saveSizeToNBT;
   protected int stackSizeLimit;
+  /**
+   * Item handler exposing this inventory. In NeoForge 1.21.1 the capability is no longer provided via {@code getCapability};
+   * the owning mod registers this handler in {@code RegisterCapabilitiesEvent} via
+   * {@code event.registerBlockEntity(Capabilities.ItemHandler.BLOCK, type, (be, side) -> be.getItemHandler())}.
+   */
   @Getter
   protected IItemHandlerModifiable itemHandler;
-  protected LazyOptional<IItemHandlerModifiable> itemHandlerCap;
 
   /**
    * @param name Localization String for the inventory title. Can be overridden through setCustomName
    */
   public InventoryBlockEntity(BlockEntityType<?> tileEntityTypeIn, BlockPos pos, BlockState state, Component name, boolean saveSizeToNBT, int inventorySize) {
-    this(tileEntityTypeIn, pos, state, name, saveSizeToNBT, inventorySize, 64);
+    this(tileEntityTypeIn, pos, state, name, saveSizeToNBT, inventorySize, DEFAULT_STACK_SIZE_LIMIT);
   }
 
   /**
@@ -56,22 +62,6 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
     this.inventory = NonNullList.withSize(inventorySize, ItemStack.EMPTY);
     this.stackSizeLimit = maxStackSize;
     this.itemHandler = new InvWrapper(this);
-    this.itemHandlerCap = LazyOptional.of(() -> this.itemHandler);
-  }
-
-  @Nonnull
-  @Override
-  public <T> LazyOptional<T> getCapability(Capability<T> capability, @Nullable Direction facing) {
-    if (capability == ForgeCapabilities.ITEM_HANDLER) {
-      return this.itemHandlerCap.cast();
-    }
-    return super.getCapability(capability, facing);
-  }
-
-  @Override
-  public void invalidateCaps() {
-    super.invalidateCaps();
-    this.itemHandlerCap.invalidate();
   }
 
   /* Inventory management */
@@ -120,6 +110,16 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
     return this.stackSizeLimit;
   }
 
+  /**
+   * Per-item stack limit: the smaller of this inventory's configured limit and the item's own max stack size.
+   * This keeps slots and storage in sync with the rest of the game (e.g. a 256-stack item stacks to 256 here,
+   * a 16-stack item to 16, a tool to 1), instead of a flat 64 that mismatched modded stack sizes and duped items.
+   */
+  @Override
+  public int getMaxStackSize(ItemStack stack) {
+    return Math.min(this.stackSizeLimit, stack.getMaxStackSize());
+  }
+
   @Override
   public void setItem(int slot, ItemStack itemstack) {
     if (slot < 0 || slot >= this.inventory.size()) {
@@ -129,8 +129,9 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
     ItemStack current = this.inventory.get(slot);
     this.inventory.set(slot, itemstack);
 
-    if (!itemstack.isEmpty() && itemstack.getCount() > this.getMaxStackSize()) {
-      itemstack.setCount(this.getMaxStackSize());
+    int limit = this.getMaxStackSize(itemstack);
+    if (!itemstack.isEmpty() && itemstack.getCount() > limit) {
+      itemstack.setCount(limit);
     }
     if (!ItemStack.matches(current, itemstack)) {
       this.setChangedFast();
@@ -178,7 +179,7 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
   @Override
   public boolean canPlaceItem(int slot, ItemStack itemstack) {
     if (slot < this.getContainerSize()) {
-      return this.inventory.get(slot).isEmpty() || itemstack.getCount() + this.inventory.get(slot).getCount() <= this.getMaxStackSize();
+      return this.inventory.get(slot).isEmpty() || itemstack.getCount() + this.inventory.get(slot).getCount() <= this.getMaxStackSize(itemstack);
     }
     return false;
   }
@@ -210,33 +211,33 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
   /* NBT */
 
   @Override
-  public void load(CompoundTag tags) {
-    super.load(tags);
+  public void loadAdditional(CompoundTag tags, HolderLookup.Provider registries) {
+    super.loadAdditional(tags, registries);
     if (saveSizeToNBT) {
       this.resizeInternal(tags.getInt(TAG_INVENTORY_SIZE));
     }
-    this.readInventoryFromNBT(tags);
+    this.readInventoryFromNBT(tags, registries);
   }
 
   @Override
-  public void saveSynced(CompoundTag tags) {
-    super.saveSynced(tags);
+  public void saveSynced(CompoundTag tags, HolderLookup.Provider registries) {
+    super.saveSynced(tags, registries);
     // only sync the size to the client by default
     if (saveSizeToNBT) {
       tags.putInt(TAG_INVENTORY_SIZE, this.inventory.size());
     }
   }
-  
+
   @Override
-  public void saveAdditional(CompoundTag tags) {
-    super.saveAdditional(tags);
-    this.writeInventoryToNBT(tags);
+  public void saveAdditional(CompoundTag tags, HolderLookup.Provider registries) {
+    super.saveAdditional(tags, registries);
+    this.writeInventoryToNBT(tags, registries);
   }
 
   /**
    * Writes the contents of the inventory to the tag
    */
-  public void writeInventoryToNBT(CompoundTag tag) {
+  public void writeInventoryToNBT(CompoundTag tag, HolderLookup.Provider registries) {
     Container inventory = this;
     ListTag nbttaglist = new ListTag();
 
@@ -244,8 +245,11 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
       if (!inventory.getItem(i).isEmpty()) {
         CompoundTag itemTag = new CompoundTag();
         itemTag.putByte(TAG_SLOT, (byte) i);
-        inventory.getItem(i).save(itemTag);
-        nbttaglist.add(itemTag);
+        // 1.21: ItemStack.save() RETURNS the encoded tag and does not mutate the prefix in place
+        // (1.20 mutated it). The old code ignored the return, so each entry was written as just
+        // {Slot:i} with no item id -> items were lost on save and never synced (casting table items
+        // invisible, "No key id in MapLike[{Slot:Nb}]" errors). Store the returned merged tag.
+        nbttaglist.add(inventory.getItem(i).save(registries, itemTag));
       }
     }
 
@@ -255,16 +259,18 @@ public abstract class InventoryBlockEntity extends NameableBlockEntity implement
   /**
    * Reads an inventory from the tag. Overwrites current content
    */
-  public void readInventoryFromNBT(CompoundTag tag) {
+  public void readInventoryFromNBT(CompoundTag tag, HolderLookup.Provider registries) {
     ListTag list = tag.getList(TAG_ITEMS, Tag.TAG_COMPOUND);
 
-    int limit = this.getMaxStackSize();
-    ItemStack stack;
     for (int i = 0; i < list.size(); ++i) {
       CompoundTag itemTag = list.getCompound(i);
       int slot = itemTag.getByte(TAG_SLOT) & 255;
       if (slot < this.inventory.size()) {
-        stack = ItemStack.of(itemTag);
+        // 1.21: the slot compound carries a "Slot" byte alongside the item; an empty slot saved as
+        // just {Slot:N} (no "id") makes the strict ItemStack codec throw ("No key id in MapLike"),
+        // which dropped the synced item client-side (casting table contents looked invisible).
+        ItemStack stack = itemTag.contains("id") ? ItemStack.parseOptional(registries, itemTag) : ItemStack.EMPTY;
+        int limit = this.getMaxStackSize(stack);
         if (!stack.isEmpty() && stack.getCount() > limit) {
           stack.setCount(limit);
         }

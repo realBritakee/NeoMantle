@@ -1,7 +1,6 @@
 package slimeknights.mantle.fluid;
 
 import lombok.AllArgsConstructor;
-import lombok.Getter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.Item;
@@ -15,7 +14,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import net.minecraftforge.fluids.FluidType;
+import net.neoforged.neoforge.fluids.FluidType;
 import org.jetbrains.annotations.Nullable;
 import slimeknights.mantle.registration.FluidBuilder;
 
@@ -29,7 +28,6 @@ public class UnplaceableFluid extends Fluid {
   /** Bucket form of the liquid, use a supplier to air if no bucket form */
   @Nullable
   private final Supplier<? extends Item> bucket;
-  @Getter
   private final float explosionResistance;
   private final int tickRate;
 
@@ -45,6 +43,11 @@ public class UnplaceableFluid extends Fluid {
     this(type, bucket, 100, 5);
   }
 
+
+  @Override
+  protected float getExplosionResistance() {
+    return explosionResistance;
+  }
 
   @Override
   public FluidType getFluidType() {
